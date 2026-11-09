@@ -1,0 +1,537 @@
+{
+  "meta": {
+    "schema_version": "4.3",
+    "name": "Hippocampal-Memory-Loop",
+    "description": "Entorhinal -> dentate (neurogenesis, calcium rule) -> CA3 (recurrent, Clopath, cholinergic presynaptic suppression) -> CA1 (multi-compartment, plateau BTSP, tag-and-capture) -> entorhinal."
+  },
+  "neurotransmitters": {
+    "PRP": {
+      "clearance_model": "ExponentialDecay",
+      "baseline_ambient": 0.0,
+      "clearance_tau_ms": 600000.0,
+      "quantal_release": 1.0
+    }
+  },
+  "receptors": {
+    "NMDA_Ca": {
+      "extends": "NMDA",
+      "calcium_fraction": 0.1
+    },
+    "M_Presynaptic": {
+      "ligand": "ACh",
+      "kinetics": "MetabotropicLinearGain",
+      "tau_rise_ms": 20.0,
+      "tau_decay_ms": 500.0,
+      "cellular_modulation": {
+        "target": "PresynapticRelease",
+        "projections": ["ca3_recurrent_collaterals"],
+        "gain": -3.0,
+        "reference": { "mode": "Fixed", "value": 0.2 },
+        "min_factor": 0.2,
+        "max_factor": 1.0
+      }
+    }
+  },
+  "plasticity_rules": {
+    "Perforant_Calcium": {
+      "coincidence_model": "CalciumControl",
+      "params": {
+        "tau_pre_ms": 20.0,
+        "theta_d": 0.35,
+        "theta_p": 0.55,
+        "gamma_d": 0.0002,
+        "gamma_p": 0.0005
+      },
+      "trace_tau_ms": 1.0,
+      "base_transfer_rate": 1.0,
+      "modulator_couplings": [],
+      "w_min": 0.0,
+      "w_max": 4.0
+    },
+    "CA3_Clopath": {
+      "coincidence_model": "VoltageClopath",
+      "params": {
+        "a_ltd": 0.0001,
+        "a_ltp": 0.00001,
+        "theta_minus_mv": -60.0,
+        "theta_plus_mv": -45.0,
+        "tau_minus_ms": 10.0,
+        "tau_plus_ms": 7.0,
+        "tau_x_ms": 15.0
+      },
+      "trace_tau_ms": 1.0,
+      "base_transfer_rate": 1.0,
+      "modulator_couplings": [],
+      "weight_dependence": "SoftBound",
+      "w_min": 0.0,
+      "w_max": 3.0
+    },
+    "CA1_BTSP": {
+      "coincidence_model": "PlateauBTSP",
+      "params": {
+        "tau_et_ms": 1500.0,
+        "tau_is_ms": 800.0,
+        "eta": 0.3,
+        "eta_depress": 0.02
+      },
+      "post_event_compartment": "ApicalTuft",
+      "trace_tau_ms": 1.0,
+      "base_transfer_rate": 1.0,
+      "modulator_couplings": [],
+      "weight_dependence": "SoftBound",
+      "consolidation": {
+        "early_decay_tau_ms": 1800000.0,
+        "tag_threshold": 0.05,
+        "capture_ligand": "PRP",
+        "capture_compartment": "Soma",
+        "capture_threshold": 0.1,
+        "capture_rate": 0.0001
+      },
+      "w_min": 0.0,
+      "w_max": 5.0
+    }
+  },
+  "cell_types": {
+    "Entorhinal_Stellate": {
+      "extends": "Thalamic_Relay",
+      "homeostasis": { "target_rate_hz": 5.0 }
+    },
+    "DG_Granule": {
+      "model": "Izhikevich_1C",
+      "compartments": ["Soma"],
+      "params": {
+        "a": 0.02, "b": 0.2, "c": -65.0, "d": 8.0,
+        "v_peak_mv": 30.0, "refractory_ms": 2.0
+      },
+      "parameter_jitter": 0.03,
+      "intrinsic_current": { "type": "None" },
+      "calcium": {
+        "tau_ms": 30.0,
+        "spike_influx": { "Soma": 0.3 }
+      },
+      "homeostasis": {
+        "enabled": true,
+        "target_rate_hz": 1.0,
+        "rate_estimate_tau_ms": 2000.0,
+        "adaptation_tau_ms": 20000.0,
+        "bias_gain": 0.2,
+        "max_bias_current": 3.0,
+        "synaptic_scaling": { "tau_ms": 60000.0 }
+      },
+      "structural_plasticity": {
+        "max_incoming_synapses": 400,
+        "prune_weight_threshold": 0.02,
+        "sprout_probability_per_sec": 0.05,
+        "sprout_grace_period_ms": 5000.0
+      }
+    },
+    "DG_Basket": {
+      "extends": "Basket_FS",
+      "structural_plasticity": {
+        "max_incoming_synapses": 200,
+        "prune_weight_threshold": 0.02,
+        "sprout_probability_per_sec": 0.05,
+        "sprout_grace_period_ms": 5000.0
+      }
+    },
+    "CA3_Pyramidal": {
+      "extends": "Pyramidal_RS",
+      "params": { "d": 6.0 }
+    },
+    "CA1_Pyramidal": {
+      "model": "Izhikevich_MC",
+      "compartments": ["Soma", "BasalDendrite", "ApicalDendrite", "ApicalTuft"],
+      "params": {
+        "a": 0.02, "b": 0.2, "c": -65.0, "d": 8.0,
+        "v_peak_mv": 30.0, "refractory_ms": 2.0
+      },
+      "dendrites": {
+        "BasalDendrite": {
+          "parent": "Soma",
+          "coupling_g": 0.1,
+          "tau_ms": 15.0,
+          "e_leak_mv": -65.0,
+          "bap_kick_mv": 8.0
+        },
+        "ApicalDendrite": {
+          "parent": "Soma",
+          "coupling_g": 0.1,
+          "tau_ms": 20.0,
+          "e_leak_mv": -65.0,
+          "bap_kick_mv": 10.0
+        },
+        "ApicalTuft": {
+          "parent": "ApicalDendrite",
+          "coupling_g": 0.05,
+          "tau_ms": 25.0,
+          "e_leak_mv": -65.0,
+          "bap_kick_mv": 3.0,
+          "plateau": {
+            "g_max": 0.08,
+            "v_half_mv": -30.0,
+            "slope_mv": 3.0,
+            "reversal_potential_mv": 0.0,
+            "refractory_ms": 300.0
+          }
+        }
+      },
+      "parameter_jitter": 0.05,
+      "intrinsic_current": { "type": "None" },
+      "calcium": {
+        "tau_ms": 25.0,
+        "spike_influx": { "Soma": 0.5, "BasalDendrite": 0.3 },
+        "plateau_influx_per_ms": 0.02
+      },
+      "activity_release": [
+        {
+          "ligand": "PRP",
+          "compartment": "Soma",
+          "event": "DendriticPlateau",
+          "event_compartment": "ApicalTuft",
+          "amount": 0.2
+        }
+      ],
+      "homeostasis": {
+        "enabled": true,
+        "target_rate_hz": 2.0,
+        "rate_estimate_tau_ms": 1000.0,
+        "adaptation_tau_ms": 10000.0,
+        "bias_gain": 0.5,
+        "max_bias_current": 5.0
+      }
+    }
+  },
+  "nuclei": [
+    {
+      "id": "entorhinal",
+      "coordinates_mm": [25.0, -20.0, -25.0],
+      "radius_mm": 2.0,
+      "size": 800,
+      "composition": [
+        { "cell_type": "Entorhinal_Stellate", "fraction": 1.0, "receptors": { "Soma": ["AMPA"] } }
+      ],
+      "projections": [
+        {
+          "id": "perforant_path_dg",
+          "from_type": "Entorhinal_Stellate",
+          "to_nucleus": "dentate",
+          "to_type": "DG_Granule",
+          "target_compartment": "Soma",
+          "topology": { "type": "Random", "probability": 0.02 },
+          "conduction_velocity_m_s": 2.0,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "LogNormal", "mu": -0.3, "sigma": 0.3 },
+            "stp_rule": "Depressing_Glu",
+            "ltp_rule": "Perforant_Calcium",
+            "synaptic_scaling": "Direct",
+            "structural_plasticity": true,
+            "sprout_initial_weight": 0.2
+          }
+        },
+        {
+          "id": "perforant_path_ca3",
+          "from_type": "Entorhinal_Stellate",
+          "to_nucleus": "ca3",
+          "to_type": "CA3_Pyramidal",
+          "target_compartment": "ApicalDendrite",
+          "topology": { "type": "Random", "probability": 0.02 },
+          "conduction_velocity_m_s": 2.0,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "LogNormal", "mu": -0.5, "sigma": 0.3 },
+            "stp_rule": "Depressing_Glu",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        },
+        {
+          "id": "temporoammonic_ca1",
+          "from_type": "Entorhinal_Stellate",
+          "to_nucleus": "ca1",
+          "to_type": "CA1_Pyramidal",
+          "target_compartment": "ApicalTuft",
+          "topology": { "type": "Random", "probability": 0.03 },
+          "conduction_velocity_m_s": 2.0,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "LogNormal", "mu": 0.0, "sigma": 0.3 },
+            "stp_rule": "None",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "dentate",
+      "coordinates_mm": [27.0, -18.0, -22.0],
+      "shape": { "type": "Ellipsoid", "radii_mm": [2.0, 1.0, 0.6], "rotation_deg": [0.0, 0.0, 30.0] },
+      "layer_axis": 2,
+      "size": 1200,
+      "composition": [
+        {
+          "cell_type": "DG_Granule",
+          "fraction": 0.9,
+          "depth_range": [-0.3, 1.0],
+          "receptors": { "Soma": ["AMPA", "NMDA_Ca", "GABA_A"] },
+          "neurogenesis": {
+            "reserve_fraction": 0.15,
+            "birth_rate_per_sec": 0.5,
+            "maturation_ms": 60000.0,
+            "young_excitability_factor": 2.0
+          }
+        },
+        {
+          "cell_type": "DG_Basket",
+          "fraction": 0.1,
+          "depth_range": [-1.0, -0.3],
+          "receptors": { "Soma": ["AMPA"] }
+        }
+      ],
+      "projections": [
+        {
+          "id": "mossy_fibers",
+          "from_type": "DG_Granule",
+          "to_nucleus": "ca3",
+          "to_type": "CA3_Pyramidal",
+          "target_compartment": "Soma",
+          "topology": { "type": "FixedIndegree", "k": 5 },
+          "conduction_velocity_m_s": 0.5,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "Constant", "value": 3.0 },
+            "stp_rule": "Facilitating_Glu",
+            "ltp_rule": "None",
+            "structural_plasticity": true,
+            "sprout_initial_weight": 3.0
+          }
+        },
+        {
+          "id": "dg_to_basket",
+          "from_type": "DG_Granule",
+          "to_nucleus": "dentate",
+          "to_type": "DG_Basket",
+          "target_compartment": "Soma",
+          "topology": { "type": "Random", "probability": 0.02 },
+          "conduction_velocity_m_s": 0.5,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "LogNormal", "mu": 0.0, "sigma": 0.2 },
+            "stp_rule": "None",
+            "ltp_rule": "None",
+            "structural_plasticity": true,
+            "sprout_initial_weight": 1.0
+          }
+        },
+        {
+          "id": "dg_basket_inhibition",
+          "from_type": "DG_Basket",
+          "to_nucleus": "dentate",
+          "to_type": "DG_Granule",
+          "target_compartment": "Soma",
+          "topology": { "type": "Random", "probability": 0.2 },
+          "conduction_velocity_m_s": 0.5,
+          "transmitter": "GABA",
+          "synapse": {
+            "weight_distribution": { "type": "Gaussian", "mean": 1.5, "std": 0.2 },
+            "stp_rule": "Depressing_GABA",
+            "ltp_rule": "None",
+            "synaptic_scaling": "Inverse",
+            "structural_plasticity": true,
+            "sprout_initial_weight": 1.5
+          }
+        }
+      ]
+    },
+    {
+      "id": "ca3",
+      "coordinates_mm": [28.0, -15.0, -20.0],
+      "radius_mm": 1.5,
+      "size": 1000,
+      "composition": [
+        {
+          "cell_type": "CA3_Pyramidal",
+          "fraction": 0.8,
+          "receptors": {
+            "Soma": ["AMPA", "NMDA", "GABA_A"],
+            "ApicalDendrite": ["AMPA", "NMDA", "M_Presynaptic"]
+          }
+        },
+        { "cell_type": "Basket_FS", "fraction": 0.2, "receptors": { "Soma": ["AMPA"] } }
+      ],
+      "projections": [
+        {
+          "id": "ca3_recurrent_collaterals",
+          "from_type": "CA3_Pyramidal",
+          "to_nucleus": "ca3",
+          "to_type": "CA3_Pyramidal",
+          "target_compartment": "ApicalDendrite",
+          "topology": { "type": "Random", "probability": 0.05 },
+          "conduction_velocity_m_s": 0.5,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "LogNormal", "mu": -0.5, "sigma": 0.4 },
+            "stp_rule": "Depressing_Glu",
+            "ltp_rule": "CA3_Clopath",
+            "structural_plasticity": false
+          }
+        },
+        {
+          "id": "schaffer_collaterals",
+          "from_type": "CA3_Pyramidal",
+          "to_nucleus": "ca1",
+          "to_type": "CA1_Pyramidal",
+          "target_compartment": "BasalDendrite",
+          "topology": { "type": "Random", "probability": 0.05 },
+          "conduction_velocity_m_s": 0.5,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "LogNormal", "mu": -0.7, "sigma": 0.3 },
+            "stp_rule": "Depressing_Glu",
+            "ltp_rule": "CA1_BTSP",
+            "structural_plasticity": false
+          }
+        },
+        {
+          "id": "ca3_to_basket",
+          "from_type": "CA3_Pyramidal",
+          "to_nucleus": "ca3",
+          "to_type": "Basket_FS",
+          "target_compartment": "Soma",
+          "topology": { "type": "Random", "probability": 0.05 },
+          "conduction_velocity_m_s": 0.5,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "LogNormal", "mu": 0.0, "sigma": 0.2 },
+            "stp_rule": "Depressing_Glu",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        },
+        {
+          "id": "ca3_basket_inhibition",
+          "from_type": "Basket_FS",
+          "to_nucleus": "ca3",
+          "to_type": "CA3_Pyramidal",
+          "target_compartment": "Soma",
+          "topology": { "type": "Random", "probability": 0.2 },
+          "conduction_velocity_m_s": 0.5,
+          "transmitter": "GABA",
+          "synapse": {
+            "weight_distribution": { "type": "Gaussian", "mean": 1.5, "std": 0.2 },
+            "stp_rule": "Depressing_GABA",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "ca1",
+      "coordinates_mm": [30.0, -12.0, -18.0],
+      "radius_mm": 1.5,
+      "size": 1000,
+      "composition": [
+        {
+          "cell_type": "CA1_Pyramidal",
+          "fraction": 0.8,
+          "receptors": {
+            "Soma": ["GABA_A"],
+            "BasalDendrite": ["AMPA", "NMDA_Ca"],
+            "ApicalTuft": ["AMPA", "NMDA_Ca"]
+          }
+        },
+        { "cell_type": "Basket_FS", "fraction": 0.2, "receptors": { "Soma": ["AMPA"] } }
+      ],
+      "projections": [
+        {
+          "id": "ca1_to_entorhinal",
+          "from_type": "CA1_Pyramidal",
+          "to_nucleus": "entorhinal",
+          "to_type": "Entorhinal_Stellate",
+          "target_compartment": "Soma",
+          "topology": { "type": "Random", "probability": 0.02 },
+          "conduction_velocity_m_s": 1.0,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "LogNormal", "mu": -0.3, "sigma": 0.3 },
+            "stp_rule": "None",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        },
+        {
+          "id": "ca1_to_basket",
+          "from_type": "CA1_Pyramidal",
+          "to_nucleus": "ca1",
+          "to_type": "Basket_FS",
+          "target_compartment": "Soma",
+          "topology": { "type": "Random", "probability": 0.05 },
+          "conduction_velocity_m_s": 0.5,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "LogNormal", "mu": 0.0, "sigma": 0.2 },
+            "stp_rule": "Depressing_Glu",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        },
+        {
+          "id": "ca1_basket_inhibition",
+          "from_type": "Basket_FS",
+          "to_nucleus": "ca1",
+          "to_type": "CA1_Pyramidal",
+          "target_compartment": "Soma",
+          "topology": { "type": "Random", "probability": 0.2 },
+          "conduction_velocity_m_s": 0.5,
+          "transmitter": "GABA",
+          "synapse": {
+            "weight_distribution": { "type": "Gaussian", "mean": 1.5, "std": 0.2 },
+            "stp_rule": "Depressing_GABA",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        }
+      ]
+    }
+  ],
+  "projections": [
+    {
+      "id": "septal_cholinergic_ca3",
+      "from_nucleus": "aras_core",
+      "from_type": "Tonic_Pacemaker",
+      "to_nucleus": "ca3",
+      "to_type": "CA3_Pyramidal",
+      "target_compartment": "ApicalDendrite",
+      "topology": { "type": "FixedIndegree", "k": 10 },
+      "conduction_velocity_m_s": 2.0,
+      "transmitter": "ACh",
+      "synapse": {
+        "weight_distribution": { "type": "LogNormal", "mu": 0.0, "sigma": 0.2 },
+        "stp_rule": "None",
+        "ltp_rule": "None",
+        "structural_plasticity": false
+      }
+    }
+  ],
+  "io_interfaces": {
+    "sensory_inputs": [
+      {
+        "id": "arena_position",
+        "target_nucleus": "entorhinal",
+        "target_type": "Entorhinal_Stellate",
+        "target_compartment": "Soma",
+        "target_subrange": [0.0, 1.0],
+        "channel_axis": 0,
+        "dimensions": 2,
+        "encoding": "MultiDimGaussianReceptiveField",
+        "min_input": [-1.0, -1.0],
+        "max_input": [1.0, 1.0],
+        "receptive_field_sigma": 0.2,
+        "gain_current": 8.0,
+        "centers": { "type": "Random" }
+      }
+    ]
+  }
+}

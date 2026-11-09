@@ -1,0 +1,194 @@
+{
+  "meta": {
+    "schema_version": "4.3",
+    "name": "Head-Direction-Ring-Attractor",
+    "description": "Bump attractor on a periodic feature space with offset-driven path integration."
+  },
+  "cell_types": {
+    "HD_Cell": {
+      "extends": "Thalamic_Relay",
+      "intrinsic_current": {
+        "type": "OrnsteinUhlenbeck",
+        "mean_current": 2.0,
+        "sigma_current": 1.0,
+        "tau_ms": 5.0
+      },
+      "homeostasis": { "$replace": true, "enabled": false }
+    }
+  },
+  "nuclei": [
+    {
+      "id": "hd_ring",
+      "coordinates_mm": [5.0, -12.0, 2.0],
+      "radius_mm": 1.0,
+      "size": 300,
+      "composition": [
+        {
+          "name": "Ring",
+          "cell_type": "HD_Cell",
+          "fraction": 0.4,
+          "receptors": { "Soma": ["AMPA", "NMDA", "GABA_A"] },
+          "feature_space": { "dimensions": 1, "extent": [360.0], "periodic": [true], "layout": "Lattice", "lattice_shape": [120] }
+        },
+        {
+          "name": "Shift_CW",
+          "cell_type": "HD_Cell",
+          "fraction": 0.4,
+          "receptors": { "Soma": ["AMPA"] },
+          "feature_space": { "dimensions": 1, "extent": [360.0], "periodic": [true], "layout": "Lattice", "lattice_shape": [120] }
+        },
+        {
+          "name": "Ring_Inhibition",
+          "cell_type": "Basket_FS",
+          "fraction": 0.2,
+          "receptors": { "Soma": ["AMPA"] }
+        }
+      ],
+      "projections": [
+        {
+          "id": "ring_recurrent_excitation",
+          "from_type": "Ring",
+          "to_nucleus": "hd_ring",
+          "to_type": "Ring",
+          "target_compartment": "Soma",
+          "topology": {
+            "type": "Kernel",
+            "space": "Feature",
+            "axes": [0],
+            "kernel": { "type": "VonMises", "kappa": 8.0 },
+            "max_prob": 0.8,
+            "allow_autapses": false
+          },
+          "conduction_velocity_m_s": 1.0,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "Constant", "value": 1.0 },
+            "stp_rule": "None",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        },
+        {
+          "id": "ring_to_inhibition",
+          "from_type": "Ring",
+          "to_nucleus": "hd_ring",
+          "to_type": "Ring_Inhibition",
+          "target_compartment": "Soma",
+          "topology": { "type": "Random", "probability": 0.3 },
+          "conduction_velocity_m_s": 1.0,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "Constant", "value": 1.0 },
+            "stp_rule": "None",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        },
+        {
+          "id": "global_inhibition",
+          "from_type": "Ring_Inhibition",
+          "to_nucleus": "hd_ring",
+          "to_type": "Ring",
+          "target_compartment": "Soma",
+          "topology": { "type": "Random", "probability": 0.5 },
+          "conduction_velocity_m_s": 1.0,
+          "transmitter": "GABA",
+          "synapse": {
+            "weight_distribution": { "type": "Gaussian", "mean": 1.5, "std": 0.1 },
+            "stp_rule": "None",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        },
+        {
+          "id": "ring_to_shift",
+          "from_type": "Ring",
+          "to_nucleus": "hd_ring",
+          "to_type": "Shift_CW",
+          "target_compartment": "Soma",
+          "topology": { "type": "OneToOne" },
+          "conduction_velocity_m_s": 1.0,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "Constant", "value": 1.5 },
+            "stp_rule": "None",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        },
+        {
+          "id": "shift_to_ring",
+          "from_type": "Shift_CW",
+          "to_nucleus": "hd_ring",
+          "to_type": "Ring",
+          "target_compartment": "Soma",
+          "topology": {
+            "type": "Kernel",
+            "space": "Feature",
+            "axes": [0],
+            "kernel": { "type": "Gaussian", "sigma": 10.0 },
+            "offset": [12.0],
+            "max_prob": 0.8
+          },
+          "conduction_velocity_m_s": 1.0,
+          "transmitter": "Glu",
+          "synapse": {
+            "weight_distribution": { "type": "Constant", "value": 1.0 },
+            "stp_rule": "None",
+            "ltp_rule": "None",
+            "structural_plasticity": false
+          }
+        }
+      ]
+    }
+  ],
+  "io_interfaces": {
+    "sensory_inputs": [
+      {
+        "id": "angular_velocity",
+        "target_nucleus": "hd_ring",
+        "target_type": "Shift_CW",
+        "target_compartment": "Soma",
+        "target_subrange": [0.0, 1.0],
+        "channel_axis": 0,
+        "dimensions": 1,
+        "encoding": "DirectCurrent",
+        "min_input": 0.0,
+        "max_input": 1.0,
+        "min_current": 0.0,
+        "max_current": 6.0
+      },
+      {
+        "id": "visual_heading_cue",
+        "target_nucleus": "hd_ring",
+        "target_type": "Ring",
+        "target_compartment": "Soma",
+        "target_subrange": [0.0, 1.0],
+        "channel_axis": 0,
+        "dimensions": 1,
+        "encoding": "MultiDimGaussianReceptiveField",
+        "min_input": 0.0,
+        "max_input": 360.0,
+        "periodic": [true],
+        "receptive_field_sigma": 20.0,
+        "gain_current": 5.0,
+        "centers": { "type": "FeatureSpace" }
+      }
+    ],
+    "motor_outputs": [
+      {
+        "id": "decoded_heading",
+        "source_nucleus": "hd_ring",
+        "source_type": "Ring",
+        "source_subrange": [0.0, 1.0],
+        "channel_axis": 0,
+        "dimensions": 2,
+        "decoding": "PopulationVector",
+        "preferred_directions": "FeatureSpace",
+        "tau_trace_ms": 50.0,
+        "rate_normalization_hz": 30.0,
+        "output_gain": 1.0
+      }
+    ]
+  }
+}

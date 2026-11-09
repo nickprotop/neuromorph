@@ -1,0 +1,77 @@
+{
+  "meta": {
+    "schema_version": "4.3",
+    "name": "Closed-Loop-Brain-With-Limbic-And-Navigation",
+    "description": "brain.json plus amygdala, hippocampus and head-direction modules. brain.json is not modified.",
+    "seed": 2024
+  },
+  "includes": [
+    { "path": "brain.json" },
+    { "path": "modules/fear_circuit.json", "namespace": "fear" },
+    { "path": "modules/hippocampus.json", "namespace": "hpc" },
+    { "path": "modules/head_direction.json", "namespace": "hd" }
+  ],
+  "recording": {
+    "probes": [
+      {
+        "id": "ctx_spikes",
+        "nucleus": "cortex_S1_M1",
+        "population": "Pyramidal_RS",
+        "selection": { "type": "Random", "count": 200 },
+        "variables": ["Spikes"]
+      },
+      {
+        "id": "ca1_state",
+        "nucleus": "hpc.ca1",
+        "population": "CA1_Pyramidal",
+        "selection": { "type": "First", "count": 10 },
+        "sample_interval_ms": 1.0,
+        "variables": [
+          "V:Soma", "V:ApicalTuft", "Calcium:BasalDendrite", "Ligand:hpc.PRP@Soma",
+          "Activation:hpc.NMDA_Ca@BasalDendrite", "Factor:MembraneExcitability",
+          "HomeostaticBias", "RateEstimate", "Plateau:ApicalTuft"
+        ]
+      },
+      {
+        "id": "schaffer_weights",
+        "projection": "hpc.schaffer_collaterals",
+        "selection": { "type": "Random", "count": 1000 },
+        "sample_interval_ms": 1000.0,
+        "variables": ["Weight", "EarlyWeight", "LateWeight", "Eligibility"]
+      },
+      {
+        "id": "dg_newborns",
+        "nucleus": "hpc.dentate",
+        "population": "DG_Granule",
+        "selection": { "type": "All" },
+        "sample_interval_ms": 1000.0,
+        "variables": ["Alive"]
+      },
+      {
+        "id": "hd_rate",
+        "nucleus": "hd.hd_ring",
+        "population": "Ring",
+        "variables": ["PopulationRate"],
+        "rate_window_ms": 50.0,
+        "sample_interval_ms": 10.0
+      },
+      { "id": "limb", "motor_output": "upper_limb_muscle_synergies", "sample_interval_ms": 1.0 },
+      { "id": "freezing", "motor_output": "fear.freezing_response", "sample_interval_ms": 10.0 },
+      { "id": "heading", "motor_output": "hd.decoded_heading", "sample_interval_ms": 10.0 },
+      { "id": "learning_state", "control": "freeze_learning", "sample_interval_ms": 10.0 }
+    ]
+  },
+  "runtime_controls": [
+    {
+      "id": "freeze_learning",
+      "type": "PlasticityGate",
+      "rules": ["Cortical_ThreeFactor_STDP", "Corticospinal_ThreeFactor_STDP", "fear.Fear_NE_STDP", "hpc.CA1_BTSP"],
+      "default": 1.0
+    },
+    { "id": "ap5", "type": "ReceptorBlock", "receptor": "hpc.NMDA_Ca", "nuclei": ["hpc.ca1", "hpc.dentate"], "default": 0.0 },
+    { "id": "da_clamp", "type": "LigandClamp", "ligand": "DA", "nuclei": ["cortex_S1_M1"], "default": -1.0 },
+    { "id": "no_sprouting", "type": "StructuralGate", "default": 1.0 },
+    { "id": "quiet_arousal", "type": "NoiseScale", "nuclei": ["aras_core"], "default": 1.0 },
+    { "id": "place_input_gain", "type": "InputGain", "input": "hpc.arena_position", "default": 1.0 }
+  ]
+}

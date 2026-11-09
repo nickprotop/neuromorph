@@ -1,0 +1,30 @@
+{
+  "meta": {
+    "schema_version": "4.3",
+    "name": "Shared-Neuromodulator-Library",
+    "description": "Ligands and receptors shared by several modules. Include with root_namespace: true."
+  },
+  "neurotransmitters": {
+    "NE": {
+      "clearance_model": "ExponentialDecay",
+      "baseline_ambient": 0.05,
+      "clearance_tau_ms": 300.0,
+      "quantal_release": 0.003
+    }
+  },
+  "receptors": {
+    "Beta_Adrenergic": {
+      "ligand": "NE",
+      "kinetics": "MetabotropicLinearGain",
+      "tau_rise_ms": 30.0,
+      "tau_decay_ms": 600.0,
+      "cellular_modulation": {
+        "target": "MembraneExcitability",
+        "gain": 2.0,
+        "reference": { "mode": "Fixed", "value": 0.05 },
+        "min_factor": 0.5,
+        "max_factor": 2.0
+      }
+    }
+  }
+}
