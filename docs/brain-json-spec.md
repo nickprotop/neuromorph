@@ -7,7 +7,6 @@ The keywords **MUST**, **MUST NOT**, **SHOULD** and **MAY** are used as in RFC 2
 ---
 
 ## Table of Contents
-0. [Changes from v4.2](#0-changes-from-v42)
 1. [Root Schema Overview](#1-root-schema-overview)
 2. [Units & Conventions](#2-units--conventions)
 3. [Enum Reference Index](#3-enum-reference-index)
@@ -24,29 +23,6 @@ The keywords **MUST**, **MUST NOT**, **SHOULD** and **MAY** are used as in RFC 2
 5. [Execution Semantics](#5-execution-semantics)
 6. [Validation Rules](#6-validation-rules)
 7. [Complete Reference Example](#7-complete-reference-example)
-
----
-
-## 0. Changes from v4.2
-
-| # | v4.2 problem | v4.3 resolution |
-| :-- | :--- | :--- |
-| 1 | Synaptic weight never appeared in the forward pass. | Release is $\Delta C = w \cdot q \cdot r_{\text{STP}}$ ([§4.2](#42-neurotransmitters-ligand-pools)). |
-| 2 | Receptors had no conductance scale. | New required `g_max` on conductance receptors; exact concentration→conductance cascade ([§4.3](#43-receptors)). |
-| 3 | Ligand pools were sized per neuron but filled per compartment. | Pools are per **(compartment, ligand)**. |
-| 4 | A projection's `receptors` list could not be honoured, because any release activates every receptor of that ligand in the pool. | Projection `receptors` removed. Receptor expression is declared per compartment in `composition[].receptors`. |
-| 5 | Concentration could never fall below `baseline_ambient`, so DA "dips" (LTD/punishment) were impossible. A fixed `reference_baseline` equal to ambient produced a permanent LTP bias under tonic firing. | Coupling `reference` objects: `Fixed` or `RunningAverage` ([§3.13](#313-referencemode)). A running reference turns tonic release into a zero baseline, so pauses give negative deviations. |
-| 6 | The batch transfer was not discretised. Euler on a 1 ms trace with a 10 ms batch is unstable, and the "pure STDP" recipe did not work. | Exact event-driven integral of the trace ([§4.4.3](#443-stage-2--ligand-gated-transfer)). |
-| 7 | The ungated learning rate $\beta_0\tau$ was hidden. $\beta_0 = 0.01$ with $\tau = 1200$ ms gave 12× ungated learning. | The effective gain is documented; the example uses $\beta_0 = 5\times10^{-5}$ ms⁻¹. |
-| 8 | Michaelis–Menten clearance could diverge (release > $V_{\max}$). Formula singular below baseline. Both `clearance_tau_ms` and `v_max` were allowed. | Sign-safe formula, mutually exclusive fields, divergence check at load time. |
-| 9 | Units were mixed (mV, nA, nS) against dimensionless Izhikevich current. | A single unit system ([§2](#2-units--conventions)). Fields renamed: `gain_na`→`gain_current`/`max_current`, `mean_na`→`mean_current`, `conductance_ns`→`conductance`. |
-| 10 | `SymmetricSTDP` mixed Hz and ms and did not match Vogels–Sprekeler. `TripletSTDP`/`BCM_Rate` had no parameters. `Δt = 0` and pairing were undefined. | Full trace-based definitions ([§4.4.2](#442-stage-1--coincidence-models)). |
-| 11 | `Izhikevich_2C` dendrite, `AdEx`, `LIF`, homeostasis, `cellular_modulation` and `parameter_jitter` were undefined. | Equations given in [§4.3](#43-receptors) and [§4.6](#46-cell-types). |
-| 12 | Neuron placement, normalised coordinates, delays and topographic axes were undefined. | [§4.7](#47-nuclei-placement--projections). |
-| 13 | How sensory and motor dimensions map to neurons was undefined, as was overlap of multiple inputs on one population and motor normalisation. | `channel_axis`, `target_subrange`/`source_subrange`, `rate_normalization_hz` ([§4.9](#49-external-io-interfaces)). |
-| 14 | Where sprouted synapses come from and what parameters they take was undefined. | [§4.8](#48-structural-plasticity). |
-| 15 | Ligand indices relied on JSON key order. | Indices assigned by ordinal string sort ([§5.1](#51-compilation-order--indexing)). |
-| 16 | Reference example: DA never reached the corticospinal synapses; the VTA interneurons and cortical basket cells were dead ends; spatial σ gave fewer than one inhibitory input per cell; DA release exceeded $V_{\max}$; about 27% of thalamocortical weights started above `w_max`. | Example rebuilt and machine-checked against [§6](#6-validation-rules). |
 
 ---
 
