@@ -1064,7 +1064,7 @@ The compiler **SHOULD** print a per-projection table of realised synapse counts,
 It implements a **self-organising conditioned avoidance and motor control loop**:
 1. **`aras_core`** pacemakers keep a tonic cholinergic (`ACh`) arousal tone on cortical apical dendrites (`M1_Muscarinic` → `MembraneExcitability`). Cortical activity feeds back onto ARAS interneurons, which inhibit the pacemakers. This is a negative-feedback arousal loop.
 2. **`sensory_thalamus_vpl`** receives 64 somatosensory channels (subrange 0–0.8) and 8 proprioceptive channels (subrange 0.8–1.0), with local feedforward inhibition. It relays topographically to **`cortex_S1_M1`**.
-3. **`cortex_S1_M1`** has recurrent excitation (three-factor STDP, structural plasticity), E→I drive onto basket cells, perisomatic inhibition with iSTDP, mutual inhibition, and electrically coupled basket cells. It projects to the motor pool along axis 0, so channel identity is preserved.
+3. **`cortex_S1_M1`** has recurrent excitation (three-factor STDP, structural plasticity), E→I drive onto basket cells, perisomatic inhibition with iSTDP, mutual inhibition, and electrically coupled basket cells. It projects to the motor pool with broad random wiring (`Random`, about 60 inputs per motor neuron), so any cortical pattern can learn to drive any muscle channel. Only the innate reflex is channel-aligned.
 4. **`nociceptive_relay`** receives an 8-channel error signal. It triggers an **innate reflex** (static topographic arc onto the matching motor channels). It also drives **`vta_modulator`** interneurons, which **inhibit the DA pacemakers**: a DA *dip* below the running reference depresses recently tagged synapses.
 5. **`appetitive_reward_input`** depolarises the VTA pacemakers: a DA *burst* above the reference consolidates tagged synapses. DA reaches **both** the cortical apical pools (recurrent synapses) and the spinal somatic pools (corticospinal synapses). That is where the eligibility traces of the motor pathway live.
 6. **`motor_ventral_horn`** has Renshaw-like recurrent inhibition. Its 8 channels are decoded as rate traces normalised to 50 Hz.
@@ -1099,7 +1099,7 @@ From a 200-target Monte Carlo sample of the placement model:
 | `cortical_excitation_of_interneurons` | 36.7 (19–52) | 3.4 |
 | `L23_perisomatic_inhibition` | 23.8 (9–34) | 5.2 |
 | `interneuron_mutual_inhibition` | 14.2 (6–20) | 5.1 |
-| `corticospinal_pyramidal_tract` | 60.2 (10–77) | 4.3 |
+| `corticospinal_pyramidal_tract` | 60 | 4.3 |
 | `corticofugal_aras_feedback` | 40 | 12.6 |
 | `motor_recurrent_collaterals` | 80 | 1.5 |
 | `recurrent_motor_inhibition` | 20 | 1.5 |
@@ -1708,7 +1708,7 @@ The listing below must stay byte-identical to the file.
           "to_nucleus": "motor_ventral_horn",
           "to_type": "Spinal_Alpha_Motor",
           "target_compartment": "Soma",
-          "topology": { "type": "Topographic", "sigma_rel": 0.1, "max_prob": 0.05, "axes": [0] },
+          "topology": { "type": "Random", "probability": 0.0075 },
           "conduction_velocity_m_s": 25.0,
           "transmitter": "Glu",
           "synapse": {
