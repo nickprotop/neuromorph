@@ -2,11 +2,12 @@
   "meta": {
     "schema_version": "4.3",
     "name": "Closed-Loop-Brain-With-Limbic-And-Navigation",
-    "description": "brain.json plus amygdala, hippocampus and head-direction modules. brain.json is not modified.",
+    "description": "brain.json plus amygdala, hippocampus and head-direction modules, and the Hodgkin-Huxley channel library. brain.json is not modified.",
     "seed": 2024
   },
   "includes": [
     { "path": "brain.json" },
+    { "path": "modules/hh_channels.json", "root_namespace": true },
     { "path": "modules/fear_circuit.json", "namespace": "fear" },
     { "path": "modules/hippocampus.json", "namespace": "hpc" },
     { "path": "modules/head_direction.json", "namespace": "hd" }

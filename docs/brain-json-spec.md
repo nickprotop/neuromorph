@@ -25,6 +25,7 @@ The keywords **MUST**, **MUST NOT**, **SHOULD** and **MAY** are used as in RFC 2
    - [4.10 External I/O Interfaces](#410-external-io-interfaces)
    - [4.11 Recording](#411-recording)
    - [4.12 Runtime Controls](#412-runtime-controls)
+   - [4.13 Ion Channels](#413-ion_channels)
 5. [Modules & Composition](#5-modules--composition)
 6. [Execution Semantics](#6-execution-semantics)
 7. [Validation Rules](#7-validation-rules)
@@ -43,6 +44,7 @@ A **document** is a JSON object with these top-level properties:
   "simulation": { ... },         // Clock rates and global constants
   "neurotransmitters": { ... },  // Abstract ligands and clearance kinetics
   "receptors": { ... },          // Conductance channels and cellular modulation
+  "ion_channels": { ... },       // Voltage- and calcium-gated membrane channels (Hodgkin–Huxley)
   "plasticity_rules": { ... },   // Coincidence -> Trace -> Ligand-gated weight transfer
   "short_term_dynamics": { ... },// Presynaptic depression / facilitation
   "cell_types": { ... },         // Neuron and compartment dynamics
@@ -111,6 +113,7 @@ Each modulation produces a multiplicative factor $F$ ([§4.3.5](#435-cellular-mo
 | `HomeostaticSetPoint` | `4` | — | Multiplies the cell's homeostatic $r_{\text{target}}$. |
 | `ReceptorConductance` | `5` | `receptor` | Multiplies $g_{\max}$ of the named conductance receptor in every compartment of the cell (e.g. D1 → NMDA enhancement). |
 | `PresynapticRelease` | `6` | `projections` (optional) | Heteroreceptor at the input site. Multiplies the release of every event arriving in **the compartment where this receptor is expressed**, restricted to the listed projections if given (e.g. GABA_B presynaptic inhibition, ACh suppression of recurrent collaterals, endocannabinoid retrograde suppression). |
+| `ChannelConductance` | `7` | `channel` | Multiplies `g_max` of the named ion channel in every compartment of a `HodgkinHuxley` cell (e.g. ACh closing the M-current). No effect on other models (warning). |
 
 ### 3.3 `ReceptorKineticsModel`
 
@@ -151,6 +154,7 @@ $s(t)$ is the receptor activation defined in [§4.3.1](#431-activation-cascade).
 | `AdEx` | `2` | `["Soma"]` |
 | `LIF` | `3` | `["Soma"]` |
 | `Izhikevich_MC` | `4` | `"Soma"` plus 1–3 distinct dendritic compartments forming a tree ([§4.6.2](#462-multi-compartment-models)) |
+| `HodgkinHuxley` | `5` | `"Soma"` plus 0–3 distinct dendritic compartments forming a tree ([§4.6.7](#467-hodgkinhuxley-conductance-based-models)) |
 
 ### 3.7 `CompartmentType`
 
@@ -314,6 +318,16 @@ Host-settable experiment controls ([§4.12](#412-runtime-controls)).
 | `LigandClamp` | `3` | $v \ge 0$: pools in scope are held at $v$. $v < 0$: off. |
 | `NoiseScale` | `4` | Multiplies intrinsic-noise σ and shot-noise rates in scope. |
 | `InputGain` | `5` | Multiplies the drive of the named sensory input. |
+| `ChannelBlock` | `6` | Fraction $b \in [0, 1]$ of the named ion channel blocked (e.g. TTX on Na⁺, TEA on K⁺). |
+
+### 3.23 `GateRateForm`
+Voltage-dependent rate functions for ion-channel gates ([§4.13](#413-ion_channels)). $V$ in mV, rates in ms⁻¹. Fields: `form`, `rate`, `midpoint_mv`, `scale_mv`.
+
+| Value | Byte | $r(V)$ |
+| :--- | :---: | :--- |
+| `Exponential` | `0` | $\text{rate}\cdot\exp\big((V - V_{\text{mid}})/s\big)$ |
+| `Sigmoid` | `1` | $\text{rate}\,/\,\big(1 + \exp((V - V_{\text{mid}})/s)\big)$ |
+| `ExpLinear` | `2` | $\text{rate}\cdot x/(1 - e^{-x})$, with $x = (V - V_{\text{mid}})/s$; equals `rate` at $x = 0$ (engines **MUST** use the limit, e.g. a series, for $\lvert x\rvert < 10^{-6}$) |
 
 ---
 
@@ -326,7 +340,8 @@ Host-settable experiment controls ([§4.12](#412-runtime-controls)).
 | `simulation` field | Default | Meaning |
 | :--- | :--- | :--- |
 | `dt_ms` | required | Base integration step. |
-| `neuron_substeps` | `2` | Number of Euler sub-steps per `dt` for the nonlinear membrane equations ([§6.2](#62-per-step-update-order)). |
+| `neuron_substeps` | `2` | Number of sub-steps per `dt` for the nonlinear membrane equations ([§6.2](#62-per-step-update-order)). A cell type may override it with `substeps`. |
+| `temperature_c` | none | Simulation temperature (°C) for ion-channel Q10 scaling. If omitted, every channel runs at its own reference temperature. |
 | `plasticity_update_interval_ms` | required | Batch interval $\Delta_p$ for trace→weight transfer. Must be an integer multiple of `dt_ms`. |
 | `structural_update_interval_ms` | required | Interval $\Delta_s$ for pruning, sprouting and neurogenesis. Must be an integer multiple of $\Delta_p$. |
 | `plasticity_warmup_ms` | `0` | For $t <$ warmup, weight transfer (Stage 2), consolidation, synaptic scaling and structural updates are disabled. Traces, running references and homeostatic bias still run, so `RunningAverage` references settle before learning starts. |
@@ -549,15 +564,17 @@ The value $r^{\text{STP}}$ travels with the spike event to every synapse (or vol
 | `compartments` | See [§3.6](#36-neurondynamicsmodel). |
 | `params` | Somatic model parameters (below). |
 | `dendrite` | `Izhikevich_2C` only (required). |
-| `dendrites` | `Izhikevich_MC` only (required): map compartment → dendrite object with `parent`. |
-| `parameter_jitter` | $j \ge 0$. Per neuron, each `params` entry except `v_peak_mv`, `v_thresh_mv` and `refractory_ms` is set to $p(1 + j\xi)$, with $\xi \sim \mathcal N(0,1)$ truncated to $[-3, 3]$. |
+| `dendrites` | `Izhikevich_MC` (required) and `HodgkinHuxley` (optional): map compartment → dendrite object with `parent`. |
+| `channels` | `HodgkinHuxley` only (required): map compartment → list of `ion_channels` IDs; every compartment needs at least one. |
+| `substeps` | Optional override of `simulation.neuron_substeps` for this cell type. |
+| `parameter_jitter` | $j \ge 0$. Per neuron, each `params` entry except `v_peak_mv`, `v_thresh_mv`, `spike_detection_mv` and `refractory_ms` is set to $p(1 + j\xi)$, with $\xi \sim \mathcal N(0,1)$ truncated to $[-3, 3]$. For `HodgkinHuxley`, the same factor is drawn per neuron per channel and applied to that channel's `g_max`. |
 | `intrinsic_current` | `IntrinsicCurrentType` object, injected into the soma. |
 | `calcium` | Optional intracellular calcium ([§4.6.3](#463-intracellular-calcium)). |
 | `activity_release` | Optional list of activity-dependent self-release rules ([§4.6.4](#464-activity-dependent-release)). |
 | `homeostasis` | `{ "enabled": false }`, or the full object ([§4.6.5](#465-homeostasis--synaptic-scaling)). |
 | `structural_plasticity` | Optional; see [§4.9](#49-structural-plasticity--neurogenesis). |
 
-Every model has `refractory_ms`. After a spike, $V_{\text{soma}}$ is held at the reset value for that long; the other state variables keep evolving.
+Every model has `refractory_ms`. For the reset models (Izhikevich, AdEx, LIF), $V_{\text{soma}}$ is held at the reset value for that long after a spike, while the other state variables keep evolving. For `HodgkinHuxley`, nothing is held: `refractory_ms` only stops the same spike being detected twice ([§4.6.7](#467-hodgkinhuxley-conductance-based-models)).
 
 #### 4.6.1 Point models
 **`Izhikevich_1C`** — `a`, `b`, `c`, `d`, `v_peak_mv`, `refractory_ms`:
@@ -590,8 +607,8 @@ $$\dot v_c = -\frac{v_c - E_{L,c}}{\tau_{d,c}} + I_{\text{tot},c} + \sum_{n \in 
 
 #### 4.6.3 Intracellular calcium
 Optional `calcium` object: `tau_ms`, `spike_influx` (map compartment → amount added per somatic spike, i.e. bAP-driven influx), `plateau_influx_per_ms` (default 0). Every compartment of the cell gets $Ca \ge 0$, starting at 0:
-$$\frac{dCa_c}{dt} = -\frac{Ca_c}{\tau_{Ca}} + \sum_{r \in c} \text{calcium\_fraction}_r\,[I_r]_+ + \text{plateau\_influx}\cdot p_c$$
-It is integrated with exponential Euler, with the spike influx added at the spike step. Calcium is read by `CalciumControl` and can be recorded.
+$$\frac{dCa_c}{dt} = -\frac{Ca_c}{\tau_{Ca}} + \sum_{r \in c} \text{calcium\_fraction}_r\,[I_r]_+ + \sum_{\text{ch} \in c} \text{calcium\_fraction}_{\text{ch}}\,[I_{\text{ch}}]_+ + \text{plateau\_influx}\cdot p_c$$
+The second sum covers ion channels with a `calcium_fraction` (`HodgkinHuxley` only, e.g. a Ca²⁺ channel). It is integrated with exponential Euler, with the spike influx added at the spike step. Calcium is read by `CalciumControl` and can be recorded.
 
 #### 4.6.4 Activity-dependent release
 `activity_release` is a list of rules by which a neuron's own events write to its own ligand pools. This models retrograde messengers (endocannabinoids), autocrine signals, and cell-wide plasticity signals (PRP supply for capture):
@@ -616,7 +633,34 @@ with $+$ for `Direct` and $-$ for `Inverse`. Both $w^{\text{early}}$ and $w^{\te
 #### 4.6.6 Total current
 Per compartment:
 $$I_{\text{tot}} = F_{\text{ME}}\,(I_{\text{syn}} + I_{\text{gap}} + I_{\text{sensory}}) + I_{\text{int}} + I_{\text{h}}$$
-$I_{\text{int}}$ and $I_{\text{h}}$ go to the soma only. Voltage kicks (Poisson sensory, shot noise) are added directly to $V$ and are not scaled. During neurogenesis maturation, $F_{\text{ME}}$ also includes the young-neuron factor ([§4.9.3](#493-neurogenesis)).
+$I_{\text{int}}$ and $I_{\text{h}}$ go to the soma only. Voltage kicks (Poisson sensory, shot noise) are added directly to $V$ and are not scaled. During neurogenesis maturation, $F_{\text{ME}}$ also includes the young-neuron factor ([§4.9.3](#493-neurogenesis)). For `HodgkinHuxley`, the ion-channel currents come on top of $I_{\text{tot}}$ and are never scaled by $F_{\text{ME}}$.
+
+#### 4.6.7 Hodgkin–Huxley (conductance-based) models
+`HodgkinHuxley` builds the membrane from explicit ion channels ([§4.13](#413-ion_channels)), so spikes, bursts, rebound and pacemaking come from the channel kinetics instead of a reset rule. It can sit in the same brain as the reset models, because the model is chosen per cell type.
+
+| Field | Meaning |
+| :--- | :--- |
+| `params.spike_detection_mv` | Default 0. A spike is an **upward crossing** of this level at the soma. |
+| `params.refractory_ms` | Default 2. After a detected spike, further crossings are ignored for this long. The voltage is **not** held or reset. |
+| `channels` | Required. Map compartment → channel IDs. Every compartment needs at least one channel (normally a leak). |
+| `dendrites` | Optional. Map dendritic compartment → `{ "parent", "coupling_g", "plateau_detection"? }`, forming a tree rooted at the soma as in [§4.6.2](#462-multi-compartment-models). There is no `tau_ms` or `e_leak_mv`: passive properties come from the compartment's channels. There is no `bap_kick_mv`: back-propagation emerges if dendrites carry Na⁺ channels. |
+| `dendrites.*.plateau_detection` | Optional `{ "threshold_mv", "refractory_ms" }`. A `DendriticPlateau` event occurs when the compartment voltage crosses `threshold_mv` upward, at most once per `refractory_ms`. For calcium `plateau_influx`, $p_c = 1$ while the voltage is above the threshold and 0 otherwise. |
+| `substeps` | Strongly recommended. Choose it so that `dt_ms / substeps` ≤ 0.05 ms. |
+
+**Membrane equation** for compartment $c$ with neighbours $n$ (parent and children):
+$$\dot V_c = \sum_{\text{ch} \in c} g_{\text{ch}}(V_c, Ca_c)\,(E_{\text{ch}} - V_c) + I_{\text{tot},c} + \sum_{n} g_{c\leftrightarrow n}\,F_{\text{DC}}\,(V_n - V_c)$$
+$g_{\text{ch}} = g_{\max}\,F_{\text{CC}}\,(1 - b)\,\prod_{\text{gates}} x^{p}$, where $F_{\text{CC}}$ is the cell's `ChannelConductance` factor for that channel and $b$ is the active `ChannelBlock` value.
+
+**Initial state.** $V = $ `default_resting_potential_mv`. Every gate starts at its steady state $x_\infty(V_0)$ (calcium gates at $Ca = 0$).
+
+**Integration** (per sub-step of length $h = dt/\text{substeps}$, with $I_{\text{tot}}$ held fixed over the whole step as for other models):
+1. **Gates (Rush–Larsen):** $x \leftarrow x_\infty + (x - x_\infty)\,e^{-h/\tau_x}$, with $x_\infty$ and $\tau_x$ evaluated at the sub-step's starting voltage and calcium.
+2. **Voltage (exponential Euler with frozen conductances):** with $G = \sum g_{\text{ch}} + \sum g_{c\leftrightarrow n}F_{\text{DC}}$ and $V_\infty = \big(\sum g_{\text{ch}}E_{\text{ch}} + \sum g_{c\leftrightarrow n}F_{\text{DC}}V_n + I_{\text{tot},c}\big)/G$: $V_c \leftarrow V_\infty + (V_c - V_\infty)\,e^{-G h}$. Neighbour voltages are taken from the start of the sub-step. Voltage kicks are added at the first sub-step.
+3. **Detection:** check the soma for a spike and dendrites for plateau events.
+
+Calcium is updated once per step, using the channel currents accumulated over the sub-steps.
+
+**Modulation.** `MembraneExcitability`, `DendriticCoupling`, `HomeostaticSetPoint` and `ChannelConductance` apply. `SpikeAdaptation` has no effect (adaptation comes from channels, so modulate those with `ChannelConductance` instead). Homeostatic bias, intrinsic currents, sensory input and learning rules work exactly as for other models.
 
 ### 4.7 `nuclei` & Populations
 
@@ -862,7 +906,7 @@ Modulatory nuclei are ordinary nuclei. External valence signals reach them throu
 
 | Probe kind | Selector fields | Variables |
 | :--- | :--- | :--- |
-| Neuron | `nucleus`, `population`, `selection` | `Spikes` (event list), `V:<comp>`, `Calcium:<comp>`, `Ligand:<lig>@<comp>`, `Activation:<rec>@<comp>`, `Factor:<CellularModulationTarget>`, `HomeostaticBias`, `RateEstimate`, `Plateau:<comp>` (event list), `Alive` (neurogenesis) |
+| Neuron | `nucleus`, `population`, `selection` | `Spikes` (event list), `V:<comp>`, `Calcium:<comp>`, `Ligand:<lig>@<comp>`, `Activation:<rec>@<comp>`, `Factor:<CellularModulationTarget>`, `HomeostaticBias`, `RateEstimate`, `Plateau:<comp>` (event list), `Alive` (neurogenesis), and for `HodgkinHuxley` `Gate:<channel>.<gate>@<comp>` and `ChannelCurrent:<channel>@<comp>` |
 | Synapse | `projection`, `selection`, `include_new` (default false) | `Weight`, `EarlyWeight`, `LateWeight`, `Eligibility`, `Delay` |
 | Population | `nucleus`, `population`, `variables: ["PopulationRate"]`, `rate_window_ms` | Mean rate in Hz |
 | Motor output | `motor_output` | Output vector |
@@ -902,6 +946,40 @@ Modulatory nuclei are ordinary nuclei. External valence signals reach them throu
 - `ReceptorBlock` acts as in [§4.3.3](#433-conductance-current) and [§4.3.4](#434-metabotropic-activation).
 - `InputGain` multiplies currents, rates and kick sizes of the named input.
 
+### 4.13 `ion_channels`
+
+A dictionary of membrane channels used by `HodgkinHuxley` cells. Like the other definition sections, it supports `extends` and namespaces ([§5](#5-modules--composition)).
+
+| Field | Meaning |
+| :--- | :--- |
+| `g_max` | Maximum conductance in ms⁻¹. With $C_m = 1$ this is numerically the textbook value in mS/cm² (e.g. 120 for squid Na⁺). |
+| `reversal_potential_mv` | $E_{\text{ch}}$. |
+| `gates` | List of gates (may be empty, e.g. for a leak). |
+| `q10`, `reference_temperature_c` | Optional, both or neither. All gate rates are multiplied (all time constants divided) by $\phi = q_{10}^{(T - T_{\text{ref}})/10}$, with $T$ = `simulation.temperature_c` ($\phi = 1$ if that is omitted). |
+| `calcium_fraction` | Optional (default 0). Fraction of this channel's inward current that becomes calcium influx ([§4.6.3](#463-intracellular-calcium)). The cell type needs `calcium`. |
+
+**Gate object:** `name`, `power` (integer ≥ 1), and exactly one of three kinetic forms:
+
+| Form | Fields | Definition |
+| :--- | :--- | :--- |
+| Rate (classic HH) | `alpha`, `beta` (each a `GateRateForm` object) | $\tau = 1/(\alpha + \beta)$, $x_\infty = \alpha/(\alpha + \beta)$ |
+| Steady state + time constant | `steady_state` {`v_half_mv`, `slope_mv`}, `tau` | $x_\infty = 1/\big(1 + e^{(V - V_{1/2})/k}\big)$ (negative `slope_mv` for activation, positive for inactivation). `tau` is `{"type": "Constant", "tau_ms"}` or `{"type": "Bell", "tau_min_ms", "tau_max_ms", "v_peak_mv", "width_mv"}` with $\tau = \tau_{\min} + (\tau_{\max} - \tau_{\min})\,e^{-((V - V_{\text{pk}})/w)^2}$. |
+| Calcium | `calcium` {`kd`, `hill`, `tau_ms`} | $x_\infty = Ca^n / (Ca^n + K_d^n)$, $\tau$ = `tau_ms`. Reads the compartment's calcium, for calcium-activated K⁺ (AHP) channels. |
+
+#### 4.13.1 The classic squid giant axon
+Hodgkin & Huxley (1952), in the modern convention (rest ≈ −65 mV, $C_m = 1\ \mu$F/cm², 6.3 °C):
+
+$$I_{\text{Na}} = \bar g_{\text{Na}}\,m^3 h\,(E_{\text{Na}} - V), \quad I_{\text{K}} = \bar g_{\text{K}}\,n^4\,(E_{\text{K}} - V), \quad I_{\text{L}} = \bar g_{\text{L}}\,(E_{\text{L}} - V)$$
+
+| Channel | $\bar g$ (ms⁻¹) | $E$ (mV) | Gate | $\alpha$ | $\beta$ |
+| :--- | :---: | :---: | :--- | :--- | :--- |
+| Na⁺ | 120 | 50 | $m^3$ | `ExpLinear` rate 1.0, mid −40, scale 10 → $\frac{0.1(V+40)}{1 - e^{-(V+40)/10}}$ | `Exponential` rate 4, mid −65, scale −18 → $4e^{-(V+65)/18}$ |
+| | | | $h$ | `Exponential` rate 0.07, mid −65, scale −20 → $0.07e^{-(V+65)/20}$ | `Sigmoid` rate 1, mid −35, scale −10 → $\frac{1}{1 + e^{-(V+35)/10}}$ |
+| K⁺ | 36 | −77 | $n^4$ | `ExpLinear` rate 0.1, mid −55, scale 10 → $\frac{0.01(V+55)}{1 - e^{-(V+55)/10}}$ | `Exponential` rate 0.125, mid −65, scale −80 → $0.125e^{-(V+65)/80}$ |
+| Leak | 0.3 | −54.387 | — | — | — |
+
+These are provided ready to use in [`examples/modules/hh_channels.json`](../examples/modules/hh_channels.json) as `HH_Na`, `HH_K`, `HH_Leak`, together with the cell type `HH_Squid_Axon`. Since current units are mV/ms and $C_m = 1$, a current of 1 µA/cm² is 1 cu. At rest it is silent; with 10 cu (10 µA/cm²) of steady input it fires repetitively at about 69 Hz, the textbook result. This was checked with the integration scheme of [§4.6.7](#467-hodgkinhuxley-conductance-based-models): the rate is the same at 0.02 ms and 0.05 ms sub-steps and starts to drift at 0.1 ms.
+
 ---
 
 ## 5. Modules & Composition
@@ -922,7 +1000,7 @@ Modulatory nuclei are ordinary nuclei. External valence signals reach them throu
 ### 5.2 Namespaces & name resolution
 A document's **effective namespace** is the includer's namespace, extended by `namespace` if given (e.g. `hpc` inside `lab` → `lab.hpc`; the root's is empty).
 
-**Qualified names.** Every identifier *defined* in a document gets its effective namespace prefixed with a dot (`fear.lateral`). This covers dictionary keys of the five definition sections, nucleus ids, projection ids, I/O ids, probe ids and control ids. Population names are scoped to their nucleus and are not prefixed.
+**Qualified names.** Every identifier *defined* in a document gets its effective namespace prefixed with a dot (`fear.lateral`). This covers dictionary keys of the six definition sections, nucleus ids, projection ids, I/O ids, probe ids and control ids. Population names are scoped to their nucleus and are not prefixed.
 
 **Resolving references.** A reference is resolved by the first match in this order:
 - If it contains a dot, it is absolute and used as written.
@@ -933,12 +1011,12 @@ So a module can refer to `Glu`, `AMPA` or `cortex_S1_M1` from the base model wit
 **Ligand identity.** Ligand identity follows the qualified name. Shared signalling molecules (e.g. `NE`) **SHOULD** therefore be defined once in a shared library module, which every user includes with `root_namespace: true`. That way all modules release into and sense the same pools.
 
 ### 5.3 Merging
-- **Dictionaries** (`neurotransmitters`, `receptors`, `plasticity_rules`, `short_term_dynamics`, `cell_types`): union by qualified key. Defining the same qualified key twice is an error, *unless* both definitions are deep-equal after inheritance resolution (so shared libraries may be included repeatedly).
+- **Dictionaries** (`neurotransmitters`, `receptors`, `ion_channels`, `plasticity_rules`, `short_term_dynamics`, `cell_types`): union by qualified key. Defining the same qualified key twice is an error, *unless* both definitions are deep-equal after inheritance resolution (so shared libraries may be included repeatedly).
 - **Arrays** (`nuclei`, `projections`, `io_interfaces.sensory_inputs`, `io_interfaces.motor_outputs`, `recording.probes`, `runtime_controls`): concatenated in depth-first post-order. Each included document's entries come before the includer's own entries. This order defines neuron indexing and build order ([§6.1](#61-compilation-order--indexing)).
 - `augment` sections are collected and applied after merging ([§5.5](#55-augment)).
 
 ### 5.4 Inheritance (`extends`)
-Any entry of the five dictionary sections may have `"extends": "<key>"`. The parent is resolved by name (it may live in another namespace), and the child is a **deep merge** of the parent and the child's own fields:
+Any entry of the six dictionary sections may have `"extends": "<key>"`. The parent is resolved by name (it may live in another namespace), and the child is a **deep merge** of the parent and the child's own fields:
 - Objects merge recursively. Scalars and arrays in the child replace the parent's.
 - A child value of `null` deletes the key.
 - An object containing `"$replace": true` replaces the parent's object entirely (the marker itself is dropped).
@@ -970,7 +1048,7 @@ With includes, namespaces, free-standing projections, `extends` and `augment`, a
 
 ### 6.1 Compilation order & indexing
 1. Load and merge all documents ([§5](#5-modules--composition)), resolve inheritance, apply augments, then resolve and validate every reference ([§7](#7-validation-rules)).
-2. Assign dense indices to ligands, receptors, rules and cell types by **ordinal (byte-wise) string sort** of their qualified keys.
+2. Assign dense indices to ligands, receptors, ion channels, rules and cell types by **ordinal (byte-wise) string sort** of their qualified keys.
 3. Global neuron indices follow merged `nuclei` order, then `composition` order, contiguously. Positions and feature coordinates are sampled in index order.
 4. Build connectivity in this order: embedded projections (merged nucleus order, then declaration order), then free-standing projections (merged order), then gap junctions. Within a projection, targets go in ascending index order, and sources in ascending index order within each target.
 
@@ -982,7 +1060,7 @@ For step $n$ ($t \to t + dt$):
 3. **Clearance** of every pool, then `LigandClamp`.
 4. **Receptors.** Update activations $a \to s$ and desensitisation $D$. Accumulate the batch sums of $C$. Update modulation factors $F$ (and modulation running references).
 5. **Currents** $I_{\text{syn}}$, $I_{\text{gap}}$, $I_{\text{int}}$ (advance OU/shot noise), $I_h$, using state from the start of the step.
-6. **Membrane integration.** `neuron_substeps` forward-Euler sub-steps of the nonlinear voltage equations with the currents held fixed. Recovery variables ($u$, $w$) use one Euler step. Detect spikes, reset, apply refractoriness. Detect plateau onsets. Update calcium.
+6. **Membrane integration.** For reset models: `neuron_substeps` (or the cell type's `substeps`) forward-Euler sub-steps of the nonlinear voltage equations with the currents held fixed; recovery variables ($u$, $w$) use one Euler step; detect spikes, reset, apply refractoriness. For `HodgkinHuxley`: Rush–Larsen gates and exponential-Euler voltage per sub-step, with threshold-crossing detection ([§4.6.7](#467-hodgkinhuxley-conductance-based-models)). Then detect plateau onsets and update calcium.
 7. **Event processing.** For each neuron with events, in ascending index order:
    - STP update and event enqueue for each outgoing projection;
    - post-event coincidence updates (spikes and plateaus);
@@ -1001,6 +1079,7 @@ For step $n$ ($t \to t + dt$):
 
 ### 6.3 Numerical requirements
 - Every linear decay (pools, receptor cascades, desensitisation, calcium, traces, STP, OU, consolidation decay) **MUST** use exact or exponential-Euler updates. Plain Euler on these is not conforming.
+- Ion-channel gates **MUST** use the Rush–Larsen update, and `HodgkinHuxley` voltages the frozen-conductance exponential-Euler update of [§4.6.7](#467-hodgkinhuxley-conductance-based-models).
 - Single precision (`float`) is sufficient for state. Timestamps **MUST** be integer step counts.
 
 ### 6.4 Determinism
@@ -1030,6 +1109,7 @@ The compiler **MUST** reject a configuration with any error and **SHOULD** repor
 13. `CalciumControl` on a target compartment without calcium; `post_event: DendriticPlateau` or `PlateauBTSP` without a valid `post_event_compartment` that has a `plateau`; `activity_release` on an event compartment without a plateau.
 14. `Uniform` with min > max; a non-positive `std`, `sigma`, `tau`, extent or radius; `w_min > w_max`; `min_input >= max_input` on any axis.
 15. A runtime control, probe or augment referencing an unknown nucleus, population, projection, rule, receptor, ligand, input, motor output or control; a duplicate control id; a `sample_interval_ms` not a multiple of `dt_ms`.
+16. `HodgkinHuxley` without `channels` for every compartment, with reset-model fields (`dendrite`, `tau_ms`, `e_leak_mv`, `bap_kick_mv`, `plateau`), or with an unknown channel; a gate with none or more than one kinetic form, or a non-integer `power`; `q10` without `reference_temperature_c` or vice versa; a calcium gate or channel `calcium_fraction` on a cell type without `calcium`; `ChannelConductance` or `ChannelBlock` naming an unknown channel.
 
 **Warnings**
 1. An expressed receptor whose ligand pool is never written and has `baseline_ambient` = 0 (never activated).
@@ -1037,11 +1117,12 @@ The compiler **MUST** reject a configuration with any error and **SHOULD** repor
 3. A population with no inbound drive (no afferent projection, sensory input or intrinsic current), or with no efferent projection and no motor readout (dead end).
 4. More than 1% of initial weight mass clipped by `w_min`/`w_max`.
 5. Realised mean indegree < 1 for any projection.
-6. A modulation target with no effect on the model (`SpikeAdaptation` on `LIF`, `DendriticCoupling` on a single-compartment cell).
+6. A modulation target with no effect on the model (`SpikeAdaptation` on `LIF` or `HodgkinHuxley`, `DendriticCoupling` on a single-compartment cell, `ChannelConductance` on a non-`HodgkinHuxley` cell).
 7. Overlapping sensory subranges on one population.
 8. A three-factor rule with $\beta_0\,\tau_{\text{trace}} > 0.1$ (large ungated drift).
 9. A neurogenic population with a non-structural incoming or outgoing projection.
 10. An included document whose `simulation` is ignored because the root defines its own.
+11. A `HodgkinHuxley` cell type whose sub-step (`dt_ms` / substeps) exceeds 0.05 ms.
 
 The compiler **SHOULD** print a per-projection table of realised synapse counts, mean/min/max indegree, and delay range.
 
@@ -1053,6 +1134,7 @@ The compiler **SHOULD** print a per-projection table of realised synapse counts,
 | :--- | :--- |
 | [`examples/brain.json`](../examples/brain.json) | Base model: closed-loop conditioned avoidance and motor control. Complete on its own. |
 | [`examples/modules/neuromodulators.json`](../examples/modules/neuromodulators.json) | Namespace-free shared library: noradrenaline (`NE`) and its β-adrenergic receptor. |
+| [`examples/modules/hh_channels.json`](../examples/modules/hh_channels.json) | Namespace-free shared library: the classic Hodgkin–Huxley squid-axon channels and the `HH_Squid_Axon` cell type ([§4.13.1](#4131-the-classic-squid-giant-axon)). |
 | [`examples/modules/fear_circuit.json`](../examples/modules/fear_circuit.json) | Amygdala and locus coeruleus (namespace `fear`). |
 | [`examples/modules/hippocampus.json`](../examples/modules/hippocampus.json) | Entorhinal–dentate–CA3–CA1 memory loop (namespace `hpc`). |
 | [`examples/modules/head_direction.json`](../examples/modules/head_direction.json) | Ring attractor with path integration (namespace `hd`). |

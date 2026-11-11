@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "schema_version": "4.3",
+    "name": "Hodgkin-Huxley-Squid-Axon-Library",
+    "description": "Classic Hodgkin & Huxley (1952) squid giant axon channels, modern convention (rest about -65 mV, 6.3 C). Include with root_namespace: true."
+  },
+  "ion_channels": {
+    "HH_Na": {
+      "g_max": 120.0,
+      "reversal_potential_mv": 50.0,
+      "q10": 3.0,
+      "reference_temperature_c": 6.3,
+      "gates": [
+        {
+          "name": "m",
+          "power": 3,
+          "alpha": { "form": "ExpLinear", "rate": 1.0, "midpoint_mv": -40.0, "scale_mv": 10.0 },
+          "beta": { "form": "Exponential", "rate": 4.0, "midpoint_mv": -65.0, "scale_mv": -18.0 }
+        },
+        {
+          "name": "h",
+          "power": 1,
+          "alpha": { "form": "Exponential", "rate": 0.07, "midpoint_mv": -65.0, "scale_mv": -20.0 },
+          "beta": { "form": "Sigmoid", "rate": 1.0, "midpoint_mv": -35.0, "scale_mv": -10.0 }
+        }
+      ]
+    },
+    "HH_K": {
+      "g_max": 36.0,
+      "reversal_potential_mv": -77.0,
+      "q10": 3.0,
+      "reference_temperature_c": 6.3,
+      "gates": [
+        {
+          "name": "n",
+          "power": 4,
+          "alpha": { "form": "ExpLinear", "rate": 0.1, "midpoint_mv": -55.0, "scale_mv": 10.0 },
+          "beta": { "form": "Exponential", "rate": 0.125, "midpoint_mv": -65.0, "scale_mv": -80.0 }
+        }
+      ]
+    },
+    "HH_Leak": {
+      "g_max": 0.3,
+      "reversal_potential_mv": -54.387,
+      "gates": []
+    }
+  },
+  "cell_types": {
+    "HH_Squid_Axon": {
+      "model": "HodgkinHuxley",
+      "compartments": ["Soma"],
+      "channels": { "Soma": ["HH_Na", "HH_K", "HH_Leak"] },
+      "params": { "spike_detection_mv": 0.0, "refractory_ms": 2.0 },
+      "substeps": 25,
+      "parameter_jitter": 0.0,
+      "intrinsic_current": { "type": "None" },
+      "homeostasis": { "enabled": false }
+    }
+  }
+}

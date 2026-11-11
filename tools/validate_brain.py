@@ -23,7 +23,7 @@ import numpy as np
 from math import erf, sqrt, log
 
 ERR, WARN = [], []
-DICTS = ["neurotransmitters", "receptors", "plasticity_rules", "short_term_dynamics", "cell_types"]
+DICTS = ["neurotransmitters", "receptors", "plasticity_rules", "short_term_dynamics", "cell_types", "ion_channels"]
 IDRE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 def q(ns, name): return f"{ns}.{name}" if ns else name
@@ -94,7 +94,7 @@ def resolve_entry(s, k, seen=()):
     resolved[s][k] = v; return v
 for s in DICTS:
     for k in list(defs[s]): resolve_entry(s, k)
-NT, RC, PR, ST, CT = (resolved[s] for s in DICTS)
+NT, RC, PR, ST, CT, IC = (resolved[s] for s in DICTS)
 def bail():
     if ERR: print("ERRORS", ERR); print("WARNINGS", WARN); sys.exit(1)
 bail()
@@ -118,12 +118,40 @@ for k, rule in PR.items():
 for k, n in NT.items():
     em = n["clearance_model"] == "ExponentialDecay"
     if em != ("clearance_tau_ms" in n) or (not em) != ("v_max" in n and "k_m" in n): ERR.append(f"clearance fields {k}")
+for k, ch in IC.items():
+    if ("q10" in ch) != ("reference_temperature_c" in ch): ERR.append(f"channel {k}: q10 without reference temperature")
+    for g in ch["gates"]:
+        forms = [("alpha" in g and "beta" in g), ("steady_state" in g and "tau" in g), ("calcium" in g)]
+        if sum(forms) != 1: ERR.append(f"channel {k} gate {g.get('name')}: needs exactly one kinetic form")
+        if not isinstance(g.get("power"), int) or g["power"] < 1: ERR.append(f"channel {k} gate {g.get('name')}: power")
+        for f in (g.get("alpha"), g.get("beta")):
+            if f and f["form"] not in ("Exponential", "Sigmoid", "ExpLinear"): ERR.append(f"channel {k}: rate form {f['form']}")
 for k, c in CT.items():
     for ar in c.get("activity_release", []): ar["ligand"] = resolve(ar["ligand"], defns["cell_types"][k], NT, "ligand")
     m = c["model"]; comps = c["compartments"]
     if m in ("Izhikevich_1C", "AdEx", "LIF") and comps != ["Soma"]: ERR.append(f"compartments {k}")
     if m == "Izhikevich_2C" and ("dendrite" not in c or len(comps) != 2): ERR.append(f"2C {k}")
-    if m == "Izhikevich_MC":
+    if m == "HodgkinHuxley":
+        ns = defns["cell_types"][k]
+        for bad in ("dendrite",):
+            if bad in c: ERR.append(f"HH {k}: reset-model field {bad}")
+        for comp, dd in c.get("dendrites", {}).items():
+            for bad in ("tau_ms", "e_leak_mv", "bap_kick_mv", "plateau"):
+                if bad in dd: ERR.append(f"HH {k}/{comp}: reset-model field {bad}")
+        chans = c.get("channels", {})
+        if set(chans) != set(comps): ERR.append(f"HH {k}: channels must cover every compartment")
+        for comp, lst in chans.items():
+            if not lst: ERR.append(f"HH {k}/{comp}: no channels")
+            res = [resolve(ch, ns, IC, "ion channel") for ch in lst]
+            for ch in res:
+                if ch and (any("calcium" in g for g in IC[ch]["gates"]) or IC[ch].get("calcium_fraction", 0)) and "calcium" not in c:
+                    ERR.append(f"HH {k}: calcium channel {ch} without cell calcium")
+            chans[comp] = res
+        sub = c.get("substeps")
+        dtv = next((d["simulation"]["dt_ms"] for d, *_ in docs if "simulation" in d), None)
+        if dtv and sub is None: sub = next((d["simulation"].get("neuron_substeps", 2) for d, *_ in docs if "simulation" in d), 2)
+        if dtv and dtv / sub > 0.05: WARN.append(f"HH {k}: sub-step {dtv/sub:.3f} ms > 0.05 ms")
+    if m in ("Izhikevich_MC", "HodgkinHuxley"):
         dd = c.get("dendrites", {})
         if set(dd) != set(comps) - {"Soma"} or "Soma" not in comps: ERR.append(f"MC compartments {k}")
         for comp in dd:
